@@ -8,3 +8,4 @@ alluxio/alluxio:latest
 hazelcast/hazelcast:5.4.0
 apacheignite/ignite:2.16.0
 oliver006/redis_exporter
+prom/prometheus:v2.17.1
