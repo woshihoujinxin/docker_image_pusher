@@ -1,14 +1,1 @@
-nginx
-#支持私库
-k8s.gcr.io/kube-state-metrics/kube-state-metrics:v2.0.0
-xhofe/alist:latest
-#支持指定架构
---platform=linux/arm64 xiaoyaliu/alist
-alluxio/alluxio:latest
-hazelcast/hazelcast:5.4.0
-apacheignite/ignite:2.16.0
-oliver006/redis_exporter
-prom/prometheus:v2.17.1
-grafana/grafana:5.1.0
-dockurr/windows:3.17
-omicsclass/samtools
+
