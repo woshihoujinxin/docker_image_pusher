@@ -1,2 +1,1 @@
-docker.elastic.co/beats/filebeat:7.15.0
-docker.elastic.co/logstash/logstash:7.15.0
+docker.io/istio/pilot:1.24.2
