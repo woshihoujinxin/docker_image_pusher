@@ -2,3 +2,4 @@ langgenius/dify-api
 langgenius/dify-web
 skcha/ragflow-web
 skcha/ragflow-api
+infiniflow/ragflow:latest
