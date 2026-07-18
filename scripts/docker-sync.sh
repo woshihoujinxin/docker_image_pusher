@@ -10,22 +10,25 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# 检查用户
-if [ "$EUID" -eq 0 ]; then
-    echo -e "${RED}❌ 请不要使用 root 用户执行此脚本${NC}"
-    exit 1
-fi
-
 # 配置
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+REPO_DIR="$HOME/docker_image_pusher"
 GITHUB_USER="woshihoujinxin"
 GITHUB_REPO="docker_image_pusher"
 GITHUB_TOKEN_FILE="$HOME/.github_token"
 
 # 阿里云配置
 ALIYUN_REGISTRY="registry.cn-hangzhou.aliyuncs.com"
-ALIYUN_NAMESPACE="shrimp-images"
+ALIYUN_NAMESPACE="houjinxin"
+
+# 检查 docker 权限
+if ! docker info &>/dev/null; then
+    if ! groups | grep -q "\bdocker\b"; then
+        sudo usermod -aG docker "$USER" >/dev/null 2>&1
+    fi
+    DOCKER="sudo docker"
+else
+    DOCKER="docker"
+fi
 
 # 检查参数
 if [ $# -eq 0 ]; then
@@ -57,7 +60,6 @@ echo
 # === 读取 Token ===
 if [ ! -f "$GITHUB_TOKEN_FILE" ]; then
     echo -e "${RED}❌ 未找到 GitHub Token${NC}"
-    echo -e "${YELLOW}请先运行: bash scripts/setup-token.sh${NC}"
     exit 1
 fi
 
@@ -68,33 +70,44 @@ echo -e "${YELLOW}[1/3] 触发 GitHub Action 同步...${NC}"
 
 cd "$REPO_DIR"
 
-# 检查是否有变化
-NEED_SYNC=false
+# 清空并写入新镜像
+> images.txt
 for img in "${IMAGES[@]}"; do
-    if ! grep -qx "^${img}$" images.txt 2>/dev/null; then
-        NEED_SYNC=true
+    echo "$img" >> images.txt
+done
+
+git remote set-url origin "https://github.com/${GITHUB_USER}/${GITHUB_REPO}.git"
+git pull
+
+git config user.name "Docker Sync"
+git config user.email "sync@local"
+git add images.txt
+git commit -m "Sync: ${IMAGES[*]}"
+
+# 重试推送
+PUSH_SUCCESS=false
+for i in {1..3}; do
+    if git push "https://${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${GITHUB_REPO}.git" main 2>/dev/null; then
+        PUSH_SUCCESS=true
         break
+    else
+        if [ $i -lt 3 ]; then
+            echo -n "重试 $i/3... "
+            sleep 2
+        fi
     fi
 done
 
-if [ "$NEED_SYNC" = true ]; then
-    > images.txt
-    for img in "${IMAGES[@]}"; do
-        echo "$img" >> images.txt
-    done
-
-    git remote set-url origin "https://github.com/${GITHUB_USER}/${GITHUB_REPO}.git"
-    git pull
-
-    git config user.name "Docker Sync"
-    git config user.email "sync@local"
-    git add images.txt
-    git commit -m "Sync: ${IMAGES[*]}"
-    git push "https://${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${GITHUB_REPO}.git" main
-    echo -e "${GREEN}✅ 已触发同步${NC}"
-else
-    echo -e "${GREEN}✅ 镜像已在同步队列中${NC}"
+if [ "$PUSH_SUCCESS" = false ]; then
+    echo -e "${RED}❌ 推送失败${NC}"
+    exit 1
 fi
+
+echo -e "${GREEN}✅ 已触发同步${NC}"
+
+# 获取触发时间，用于识别最新的 run
+TRIGGER_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S")
+echo -e "${YELLOW}触发时间: $TRIGGER_TIME${NC}"
 
 # === 步骤 2: 等待完成 ===
 echo
@@ -108,33 +121,45 @@ CHECK_INTERVAL=5
 
 while [ $WAIT_TIME -lt $MAX_WAIT ]; do
     RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-        "https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/actions/runs?per_page=1" 2>/dev/null)
+        "https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/actions/runs?per_page=3" 2>/dev/null)
 
-    # 使用 Python 解析 JSON（更可靠）
-    STATUS=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('workflow_runs', [{}])[0].get('status', ''))" 2>/dev/null)
-    CONCLUSION=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('workflow_runs', [{}])[0].get('conclusion', ''))" 2>/dev/null)
+    # 找到最新的、包含我们镜像名的 run
+    LATEST_RUN=$(echo "$RESPONSE" | python3 -c "
+import sys, json, datetime
+data = json.load(sys.stdin)
+trigger_time = '$TRIGGER_TIME'
+for run in data.get('workflow_runs', []):
+    created = run.get('created_at', '')
+    title = run.get('display_title', '')
+    # 检查是否是我们刚触发的（时间匹配且包含 Sync）
+    if created > trigger_time and 'Sync:' in title:
+        print(f\"{run['id']}|{run.get('status', '')}|{run.get('conclusion', '')}\")
+        break
+" 2>/dev/null)
 
-    if [ "$STATUS" = "completed" ]; then
-        if [ "$CONCLUSION" = "success" ]; then
-            echo -e "\r${GREEN}✅ 同步成功!${NC}                    "
-            break
-        else
-            echo -e "\r${RED}❌ 同步失败 (${CONCLUSION})${NC}        "
-            exit 1
+    if [ -n "$LATEST_RUN" ]; then
+        RUN_ID=$(echo "$LATEST_RUN" | cut -d'|' -f1)
+        STATUS=$(echo "$LATEST_RUN" | cut -d'|' -f2)
+        CONCLUSION=$(echo "$LATEST_RUN" | cut -d'|' -f3)
+
+        if [ "$STATUS" = "completed" ]; then
+            if [ "$CONCLUSION" = "success" ]; then
+                echo -e "\r${GREEN}✅ 同步成功!${NC}                    "
+                break
+            else
+                echo -e "\r${RED}❌ 同步失败 (${CONCLUSION})${NC}        "
+                exit 1
+            fi
         fi
-    fi
 
-    # 检查是否超时
-    if [ -z "$STATUS" ]; then
-        # STATUS 为空，可能是 API 错误，尝试继续
-        printf "\r${YELLOW}⏳ 等待中... %d 秒${NC}" $WAIT_TIME
-    else
         case "$STATUS" in
             "queued") MSG="队列中..." ;;
             "in_progress") MSG="同步中..." ;;
             *) MSG="等待中... [$STATUS]" ;;
         esac
-        printf "\r${BLUE}⏳  ${MSG} %d 秒${NC}" $WAIT_TIME
+        printf "\r${BLUE}⏳  ${MSG} %d 秒 [Run ID: $RUN_ID]${NC}" $WAIT_TIME
+    else
+        printf "\r${YELLOW}⏳ 等待 Action 启动... %d 秒${NC}" $WAIT_TIME
     fi
 
     sleep $CHECK_INTERVAL
@@ -147,6 +172,10 @@ if [ $WAIT_TIME -ge $MAX_WAIT ]; then
     exit 1
 fi
 echo
+
+# 等待阿里云镜像可用（额外缓冲时间）
+echo -e "${YELLOW}等待镜像可用...${NC}"
+sleep 10
 
 # === 步骤 3: 拉取并重命名 ===
 echo
@@ -163,13 +192,27 @@ for img in "${IMAGES[@]}"; do
 
     echo -n "  拉取 ${img}... "
 
-    if docker pull "$ALIYUN_IMAGE" 2>/dev/null; then
-        docker tag "$ALIYUN_IMAGE" "${img}"
-        docker rmi "$ALIYUN_IMAGE" 2>/dev/null || true
+    # 重试拉取
+    PULLED=false
+    for attempt in {1..5}; do
+        if $DOCKER pull "$ALIYUN_IMAGE" 2>/dev/null; then
+            PULLED=true
+            break
+        else
+            if [ $attempt -lt 5 ]; then
+                sleep 3
+            fi
+        fi
+    done
+
+    if [ "$PULLED" = true ]; then
+        $DOCKER tag "$ALIYUN_IMAGE" "${img}"
+        $DOCKER rmi "$ALIYUN_IMAGE" 2>/dev/null || true
         echo -e "${GREEN}✅${NC}"
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     else
-        echo -e "${RED}❌${NC}"
+        echo -e "${RED}❌ (5次重试失败)${NC}"
+        echo -e "  手动拉取: $DOCKER pull $ALIYUN_IMAGE"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 done
@@ -182,4 +225,4 @@ echo
 echo -e "成功: ${GREEN}${SUCCESS_COUNT}${NC}  失败: ${RED}${FAIL_COUNT}${NC}"
 echo
 echo -e "本地镜像:${NC}"
-docker images | head -10
+$DOCKER images | head -10
