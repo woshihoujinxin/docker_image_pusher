@@ -24,19 +24,17 @@ else
     DOCKER="docker"
 fi
 
+# 镜像名转换 - 简化版本：只取镜像名，去掉命名空间
 convert_image_name() {
     local image="$1"
     image="${image%%@*}"
-    local image_name_tag=$(echo "$image" | awk -F'/' '{print $NF}')
-    local name_space=$(echo "$image" | awk -F'/' '{if (NF==3) print $2; else if (NF==2) print $1; else print ""}')
-    local image_name=$(echo "$image_name_tag" | awk -F':' '{print $1}')
-    
-    if [ -n "$name_space" ]; then
-        echo "${name_space}_${image_name_tag}"
-    else
-        echo "$image_name_tag"
-    fi
+    # 只取最后的部分（镜像名:tag）
+    echo "$image" | awk -F'/' '{print $NF}'
 }
+
+# 确保 TOKEN 可用
+TOKEN=$(cat "$GITHUB_TOKEN_FILE")
+export TOKEN
 
 get_status() {
     python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('status', 'unknown'))"
@@ -67,10 +65,9 @@ done
 echo
 echo -e "待同步镜像:"
 for img in "${IMAGES[@]}"; do
-    echo -e "  ${YELLOW}${img}${NC}"
+    converted=$(convert_image_name "$img")
+    echo -e "  ${YELLOW}${img}${NC} → ${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/${converted}"
 done
-
-GITHUB_TOKEN=$(cat "$GITHUB_TOKEN_FILE")
 
 echo
 echo -e "${YELLOW}[1/3] 触发 GitHub Action 同步...${NC}"
@@ -82,7 +79,7 @@ for img in "${IMAGES[@]}"; do
     echo "$img" >> images.txt
 done
 
-git config --local url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+git config --local url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
 
 git pull && git add images.txt && git commit -m "Sync: ${IMAGES[*]}" && git push
 echo -e "${GREEN}✅ 镜像已在同步队列中${NC}"
@@ -99,13 +96,13 @@ CHECK_INTERVAL=5
 
 while [ $WAIT_TIME -lt $MAX_WAIT ]; do
     if [ -z "$RUN_ID" ]; then
-        RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+        RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
                 "https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/actions/runs?per_page=1")
-        RUN_ID=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); runs=data.get('workflow_runs', []); print(runs[0].get('id') if runs else '')" 2>/dev/null)
+        RUN_ID=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); runs=data.get('workflow_runs', []); print(runs[0].get('id') if runs else '')")
     fi
 
     if [ -n "$RUN_ID" ]; then
-        RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+        RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
                 "https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/actions/runs/$RUN_ID")
         
         STATUS=$(echo "$RESPONSE" | get_status)
@@ -113,10 +110,10 @@ while [ $WAIT_TIME -lt $MAX_WAIT ]; do
 
         if [ "$STATUS" = "completed" ]; then
             if [ "$CONCLUSION" = "success" ]; then
-                printf "\r${GREEN}✅ 同步成功!${NC}        "
+                printf "\r${GREEN}✅ 同步成功!${NC}\n"
                 break
             else
-                printf "\r${RED}❌ 同步失败 ($CONCLUSION)${NC}        "
+                printf "\r${RED}❌ 同步失败 ($CONCLUSION)${NC}\n"
                 exit 1
             fi
         fi
@@ -135,7 +132,11 @@ while [ $WAIT_TIME -lt $MAX_WAIT ]; do
     WAIT_TIME=$((WAIT_TIME + CHECK_INTERVAL))
 done
 
-echo
+if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+    echo
+    echo -e "${RED}⏰ 等待超时${NC}"
+    exit 1
+fi
 
 sleep 10
 
@@ -167,3 +168,6 @@ echo "  ✅ 完成!"
 echo "==========================================${NC}"
 echo
 echo -e "成功: ${GREEN}${SUCCESS_COUNT}${NC}  失败: ${RED}${FAIL_COUNT}${NC}"
+echo
+echo -e "本地镜像:${NC}"
+$DOCKER images | head -10
