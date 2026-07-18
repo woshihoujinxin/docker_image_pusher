@@ -1,2 +1,1 @@
-infiniflow/ragflow:latest
-nginx:latest
+redis:latest
