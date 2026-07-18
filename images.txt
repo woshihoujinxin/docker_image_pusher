@@ -1,1 +1,1 @@
-nousresearch/hermes-agent:latest
+redis:latest
