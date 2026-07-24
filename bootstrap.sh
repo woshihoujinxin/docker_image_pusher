@@ -27,20 +27,6 @@ else
     SED_INPLACE=(-i)
 fi
 
-# 根据当前实际运行的 shell 选择 rc 文件
-# 优先用 $BASH_VERSION/$ZSH_VERSION 判断当前 shell, $SHELL 只是登录 shell 配置
-if [ -n "${BASH_VERSION:-}" ]; then
-    RC_FILE="$HOME/.bashrc"
-elif [ -n "${ZSH_VERSION:-}" ]; then
-    RC_FILE="$HOME/.zshrc"
-else
-    case "${SHELL:-}" in
-        */zsh)  RC_FILE="$HOME/.zshrc" ;;
-        */bash) RC_FILE="$HOME/.bashrc" ;;
-        *)      RC_FILE="$HOME/.profile" ;;
-    esac
-fi
-
 # === 步骤 1: 配置 GitHub hosts (可选) ===
 # 默认跳过。多数环境可直接访问 GitHub，无需修改 hosts。
 # 仅当设置 CONFIGURE_HOSTS=1 时才执行。
@@ -137,21 +123,41 @@ if [ -z "$SYNC_SRC" ]; then
 fi
 
 if [ -f "$SYNC_SRC" ]; then
-    cp "$SYNC_SRC" "$HOME/docker-sync.sh"
-    chmod +x "$HOME/docker-sync.sh"
-    echo -e "${GREEN}✅ 同步脚本已安装: ~/docker-sync.sh${NC}"
+    # 安装为 PATH 中的可执行命令, 任何 shell (bash/zsh/fish) 都能直接用,
+    # 不依赖 alias/source/rc 文件, 避免跨 shell source 报错问题
+    INSTALL_DIR="$HOME/.local/bin"
+    mkdir -p "$INSTALL_DIR"
+    cp "$SYNC_SRC" "$INSTALL_DIR/docker-sync"
+    chmod +x "$INSTALL_DIR/docker-sync"
+    echo -e "${GREEN}✅ 已安装命令: ${INSTALL_DIR}/docker-sync${NC}"
+
+    # 确保 ~/.local/bin 在 PATH 中 (export 这行在 bash/zsh 都通用)
+    case ":${PATH}:" in
+        *":${INSTALL_DIR}:"*)
+            echo -e "${GREEN}✅ ${INSTALL_DIR} 已在 PATH 中${NC}"
+            ;;
+        *)
+            PATH_LINE="export PATH=\"\$HOME/.local/bin:\$PATH\""
+            ADDED=0
+            for rc in "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+                # 只往已存在的 rc 文件追加, 避免凭空创建
+                if [ -f "$rc" ] && ! grep -q 'HOME/.local/bin' "$rc"; then
+                    printf '\n# docker-sync 命令路径\n%s\n' "$PATH_LINE" >> "$rc"
+                    echo -e "${GREEN}✅ 已追加 PATH 配置到 ${rc}${NC}"
+                    ADDED=1
+                fi
+            done
+            # 当前 session 立即生效
+            export PATH="$INSTALL_DIR:$PATH"
+            if [ "$ADDED" = "0" ]; then
+                echo -e "${YELLOW}⚠️  未找到 rc 文件, 本次仅当前 session 生效${NC}"
+                echo -e "${YELLOW}    请手动将这行加入你的 shell 配置: ${PATH_LINE}${NC}"
+            fi
+            ;;
+    esac
 else
     echo -e "${RED}❌ docker-sync.sh 未找到${NC}"
     exit 1
-fi
-
-# 写入 alias 到当前 shell 的 rc 文件 (不存在则创建)
-touch "$RC_FILE"
-if ! grep -q "alias docker-sync=" "$RC_FILE"; then
-    echo "alias docker-sync='\$HOME/docker-sync.sh'" >> "$RC_FILE"
-    echo -e "${GREEN}✅ alias 已写入 ${RC_FILE}${NC}"
-else
-    echo -e "${GREEN}✅ alias 已存在于 ${RC_FILE}${NC}"
 fi
 
 echo ""
@@ -160,12 +166,12 @@ echo "  ✅ 部署完成!"
 echo -e "==========================================${NC}"
 echo ""
 echo "使用方法:"
-echo "  source ${RC_FILE}        # 或重新打开终端"
+echo "  重新打开终端后, 直接运行:"
 echo "  docker-sync <镜像名>"
 echo ""
 echo "示例:"
 echo "  docker-sync nginx:latest"
 echo "  docker-sync redis:latest postgres:15"
 echo ""
-echo "也可直接调用:"
-echo "  bash ~/docker-sync.sh <镜像名>"
+echo "当前 session 也可立即使用 (已临时加入 PATH):"
+echo "  docker-sync <镜像名>"
