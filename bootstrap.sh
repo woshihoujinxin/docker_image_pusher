@@ -27,12 +27,19 @@ else
     SED_INPLACE=(-i)
 fi
 
-# 根据当前登录 shell 选择 rc 文件
-case "${SHELL:-}" in
-    */zsh)  RC_FILE="$HOME/.zshrc" ;;
-    */bash) RC_FILE="$HOME/.bashrc" ;;
-    *)      RC_FILE="$HOME/.profile" ;;
-esac
+# 根据当前实际运行的 shell 选择 rc 文件
+# 优先用 $BASH_VERSION/$ZSH_VERSION 判断当前 shell, $SHELL 只是登录 shell 配置
+if [ -n "${BASH_VERSION:-}" ]; then
+    RC_FILE="$HOME/.bashrc"
+elif [ -n "${ZSH_VERSION:-}" ]; then
+    RC_FILE="$HOME/.zshrc"
+else
+    case "${SHELL:-}" in
+        */zsh)  RC_FILE="$HOME/.zshrc" ;;
+        */bash) RC_FILE="$HOME/.bashrc" ;;
+        *)      RC_FILE="$HOME/.profile" ;;
+    esac
+fi
 
 # === 步骤 1: 配置 GitHub hosts (可选) ===
 # 默认跳过。多数环境可直接访问 GitHub，无需修改 hosts。

@@ -16,8 +16,9 @@ B站，抖音，Youtube全网同名，转载请注明作者<br>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/woshihoujinxin/docker_image_pusher/main/bootstrap.sh | bash
-source ~/.bashrc
 ```
+
+> 部署完成后重新打开终端，或按脚本提示 `source` 对应的配置文件（macOS 默认是 `~/.zshrc`，Linux 是 `~/.bashrc`）。
 
 ### 使用方法
 
@@ -60,8 +61,8 @@ cd ~/docker_image_pusher
 bash scripts/setup-token.sh
 
 # 3. 添加别名（可选）
-echo "alias docker-sync='$HOME/docker_image_pusher/scripts/docker-sync.sh'" >> ~/.bashrc
-source ~/.bashrc
+echo "alias docker-sync='$HOME/docker_image_pusher/scripts/docker-sync.sh'" >> ~/.zshrc  # macOS
+# echo "alias docker-sync='$HOME/docker_image_pusher/scripts/docker-sync.sh'" >> ~/.bashrc # Linux
 ```
 
 ---
