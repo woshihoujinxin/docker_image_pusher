@@ -1,4 +1,4 @@
-busybox:1.36
-curlimages/curl:8.10.1
 mysql:8.0
 redis:7-alpine
+busybox:1.36
+curlimages/curl:8.10.1
