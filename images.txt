@@ -1,1 +1,2 @@
-nginx:stable
+node:22-slim
+ghcr.io/tencentcloud/cubesandbox-base:2026.16
