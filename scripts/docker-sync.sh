@@ -187,7 +187,9 @@ FAIL_COUNT=0
 for img in "${IMAGES[@]}"; do
     IMAGE_NAME="${img%:*}"
     IMAGE_TAG="${img##*:}"
-    TARGET_IMAGE=$(echo "$IMAGE_NAME" | sed 's/[\/]/-/g')
+    # 只取镜像名本身（去掉命名空间），与 docker.yaml 推送逻辑保持一致
+    # nousresearch/hermes-agent → hermes-agent
+    TARGET_IMAGE="${IMAGE_NAME##*/}"
     ALIYUN_IMAGE="${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/${TARGET_IMAGE}:${IMAGE_TAG}"
 
     echo -n "  拉取 ${img}... "
