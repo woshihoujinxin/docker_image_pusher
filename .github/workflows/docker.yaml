@@ -39,12 +39,12 @@ jobs:
             platform=$(echo "$line" | awk -F"--platform[ =]" "{if (NF>1) print \$2}" | awk "{print \$1}")
             echo "platform is $platform"
             
-            # 获取镜像的完整名称，例如kasmweb/nginx:1.25.3（命名空间/镜像名:版本号）
+            # 获取镜像的完整名称
             image=$(echo "$line" | awk "{print \$NF}")
             
-            # 移除 Registry 前缀（如 docker.io/）和 @sha256 后缀
-            # docker.io/nousresearch/hermes-agent:v2026.7.30 → nousresearch/hermes-agent:v2026.7.30
-            image_full="${image#*/}"  # 去掉第一个/之前的部分
+            # 移除 Registry 前缀、@sha256 后缀，以及命名空间前缀
+            # docker.io/nousresearch/hermes-agent:v2026.7.30 → hermes-agent:v2026.7.30
+            image_full="${image##*/}"  # 去掉所有路径，只保留最后的镜像名
             image_full="${image_full%%@*}"  # 去掉 @sha256 后缀
             
             # 处理架构前缀
@@ -54,12 +54,8 @@ jobs:
                 platform_prefix="${platform//\//_}_"
             fi
             
-            # 将镜像路径中的 / 替换为 -，避免多级路径问题
-            # nousresearch/hermes-agent:v2026.7.30 → nousresearch-hermes-agent:v2026.7.30
-            target_image=$(echo "$image_full" | sed "s/[\/]/-/g")
-            
-            # 构建最终镜像名
-            new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$platform_prefix$target_image"
+            # 构建最终镜像名（只使用镜像名，不带命名空间）
+            new_image="$ALIYUN_REGISTRY/$ALIYUN_NAME_SPACE/$platform_prefix$image_full"
             echo "docker tag $image $new_image"
             docker tag $image $new_image
             echo "docker push $new_image"
